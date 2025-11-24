@@ -1,6 +1,5 @@
-import React from "react";
-import { Alert, Dimensions, StyleSheet, Text, View } from "react-native";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+import React, { useCallback, useState } from "react";
+import { Alert, Dimensions, Image, StyleSheet, Text, View } from "react-native";
 import { useGalleryStore } from "../store/useGalleryStore";
 import ImageCard from "./ImageCard";
 import NoMorePhotos from "./NoMorePhotos";
@@ -8,133 +7,148 @@ import NoMorePhotos from "./NoMorePhotos";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 export default function ImageStack() {
-  const { images, currentIndex, keepImage, deleteImage } = useGalleryStore();
+  const images = useGalleryStore((state) => state.images);
+  const currentIndex = useGalleryStore((state) => state.currentIndex);
+  const keepImage = useGalleryStore((state) => state.keepImage);
+  const deleteImage = useGalleryStore((state) => state.deleteImage);
+  
+  // Key untuk force re-render card setelah cancel
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const handleKeep = async () => {
-    await keepImage();
-  };
+  const currentImage = images[currentIndex];
+  const nextImage = images[currentIndex + 1];
 
-  const handleDelete = async () => {
+  // ← Swipe KIRI = KEEP
+  const handleKeep = useCallback(() => {
+    console.log("KEEP:", currentIndex);
+    keepImage();
+  }, [keepImage, currentIndex]);
+
+  // → Swipe KANAN = DELETE (dengan konfirmasi)
+  const handleDelete = useCallback(() => {
+    console.log("DELETE request:", currentIndex);
+    
     Alert.alert(
       "Hapus File?",
       "File ini akan dihapus permanen dari perangkat Anda!",
       [
-        { text: "Batal", style: "cancel" },
+        { 
+          text: "Batal", 
+          style: "cancel",
+          onPress: () => {
+            // Force re-render card dengan key baru
+            console.log("Cancel - refreshing card");
+            setRefreshKey(prev => prev + 1);
+          }
+        },
         { 
           text: "Hapus", 
           style: "destructive",
-          onPress: async () => {
-            await deleteImage();
+          onPress: () => {
+            console.log("DELETE confirmed");
+            deleteImage();
           }
         },
-      ]
+      ],
+      { cancelable: false }
     );
-  };
+  }, [deleteImage, currentIndex]);
 
+  // Loading state
   if (images.length === 0) {
     return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>
-          Loading gallery...
-        </Text>
+      <View style={styles.centerContainer}>
+        <Text style={styles.loadingText}>Memuat gallery...</Text>
       </View>
     );
   }
 
-  // Show NoMorePhotos when all photos are reviewed
-  if (currentIndex >= images.length) {
+  // All done state
+  if (currentIndex >= images.length || !currentImage) {
     return <NoMorePhotos />;
   }
 
   return (
-    <GestureHandlerRootView style={styles.container}>
-      <View style={styles.cardContainer}>
-        {/* Preview next card */}
-        {currentIndex + 1 < images.length && (
-          <View style={[styles.nextCard, { opacity: 0.5, transform: [{ scale: 0.9 }] }]}>
-            <View style={styles.cardPlaceholder} />
+    <View style={styles.container}>
+      {/* Cards container */}
+      <View style={styles.cardsArea}>
+        {/* Next card preview (di belakang) */}
+        {nextImage && (
+          <View style={styles.nextCardContainer}>
+            <Image 
+              source={{ uri: nextImage.uri }}
+              style={styles.nextCardImage}
+              resizeMode="cover"
+            />
           </View>
         )}
 
-        {/* Current card */}
+        {/* Current card (di depan) */}
         <ImageCard
-          key={currentIndex}
-          uri={images[currentIndex].uri}
-          onSwipeLeft={handleKeep}
-          onSwipeRight={handleDelete}
+          key={`card-${currentIndex}-${refreshKey}`}
+          uri={currentImage.uri}
+          onKeep={handleKeep}
+          onDelete={handleDelete}
           index={currentIndex}
           totalCards={images.length}
         />
       </View>
 
+      {/* Instructions */}
       <View style={styles.instructions}>
-        <View style={styles.instructionItem}>
-          <Text style={styles.instructionArrow}>←</Text>
-          <Text style={styles.instructionText}>Swipe kiri = KEEP</Text>
-        </View>
-        <View style={styles.instructionItem}>
-          <Text style={styles.instructionText}>Swipe kanan = DELETE</Text>
-          <Text style={styles.instructionArrow}>→</Text>
-        </View>
+        <Text style={styles.keepInstruction}>← KEEP</Text>
+        <Text style={styles.deleteInstruction}>DELETE →</Text>
       </View>
-    </GestureHandlerRootView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
   },
-  cardContainer: {
-    width: SCREEN_WIDTH,
-    alignItems: "center",
-    justifyContent: "center",
-    flex: 1,
-  },
-  nextCard: {
-    position: "absolute",
-    width: SCREEN_WIDTH * 0.9,
-    height: "70%",
-  },
-  cardPlaceholder: {
-    flex: 1,
-    backgroundColor: "#333",
-    borderRadius: 20,
-  },
-  emptyContainer: {
+  centerContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
   },
-  emptyText: {
+  loadingText: {
     color: "#888",
     fontSize: 18,
-    textAlign: "center",
+  },
+  cardsArea: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  nextCardContainer: {
+    position: "absolute",
+    width: SCREEN_WIDTH * 0.85,
+    height: "60%",
+    borderRadius: 20,
+    backgroundColor: "#222",
+    overflow: "hidden",
+    opacity: 0.5,
+    transform: [{ scale: 0.92 }],
+  },
+  nextCardImage: {
+    width: "100%",
+    height: "100%",
   },
   instructions: {
     flexDirection: "row",
-    justifyContent: "space-around",
-    width: "100%",
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-    gap: 20,
+    justifyContent: "space-between",
+    paddingHorizontal: 40,
+    paddingBottom: 50,
   },
-  instructionItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  instructionArrow: {
-    color: "#fff",
-    fontSize: 24,
+  keepInstruction: {
+    color: "#4CAF50",
+    fontSize: 20,
     fontWeight: "bold",
   },
-  instructionText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "500",
+  deleteInstruction: {
+    color: "#F44336",
+    fontSize: 20,
+    fontWeight: "bold",
   },
 });
